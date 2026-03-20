@@ -1,0 +1,149 @@
+{{ define "gkrTestVectors" }}
+
+func unmarshalProof(printable gkrtesting.PrintableProof) (Proof, error) {
+	proof := make(Proof, len(printable))
+	for i := range printable {
+		finalEvalProof := []{{ .ElementType }}(nil)
+
+		if printable[i].FinalEvalProof != nil {
+			finalEvalSlice := reflect.ValueOf(printable[i].FinalEvalProof)
+			finalEvalProof = make([]{{ .ElementType }}, finalEvalSlice.Len())
+			for k := range finalEvalProof {
+				if _, err := {{ setElement "finalEvalProof[k]" "finalEvalSlice.Index(k).Interface()" .ElementType}}; err != nil {
+					return nil, err
+				}
+			}
+		}
+
+		proof[i] = sumcheckProof{
+			partialSumPolys: make([]polynomial.Polynomial, len(printable[i].PartialSumPolys)),
+			finalEvalProof:  finalEvalProof,
+		}
+		for k := range printable[i].PartialSumPolys {
+			var err error
+			if proof[i].partialSumPolys[k], err = sliceToElementSlice(printable[i].PartialSumPolys[k]); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return proof, nil
+}
+
+type TestCase struct {
+	Circuit         gkrcore.SerializableCircuit
+	Hash            hash.Hash
+	Proof           Proof
+	FullAssignment  WireAssignment
+	InOutAssignment WireAssignment
+	Schedule        constraint.GkrProvingSchedule
+	{{ if .GenerateTestVectors }}Info gkrtesting.TestCaseInfo // we are generating the test vectors, so we need to keep the circuit instance info to ADD the proof to it and resave it{{ end }}
+}
+
+var testCases = make(map[string]*TestCase)
+
+
+func newTestCase(path string) (*TestCase, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Dir(path)
+
+	tCase, ok := testCases[path]
+	if ok {
+		return tCase, nil
+	}
+
+	info, err := cache.ReadTestCaseInfo(path)
+	if err != nil {
+		return nil, err
+	}
+
+	circuit, _ := cache.GetCircuit(filepath.Join(dir, info.Circuit))
+	var _hash hash.Hash
+	if _hash, err = hashFromDescription(info.Hash); err != nil {
+		return nil, err
+	}
+	var proof Proof
+	if proof, err = unmarshalProof(info.Proof); err != nil {
+		return nil, err
+	}
+	var schedule constraint.GkrProvingSchedule
+	if schedule, err = info.Schedule.ToProvingSchedule(); err != nil {
+		return nil, err
+	}
+	if schedule == nil {
+		if schedule, err = gkrcore.DefaultProvingSchedule(circuit); err != nil {
+			return nil, err
+		}
+	}
+
+	outputSet := make(map[int]bool, len(circuit))
+	for _, o := range circuit.Outputs() {
+		outputSet[o] = true
+	}
+
+	fullAssignment := make(WireAssignment, len(circuit))
+	inOutAssignment := make(WireAssignment, len(circuit))
+
+	inI, outI := 0, 0
+	for i := range circuit {
+		var assignmentRaw []interface{}
+		if circuit[i].IsInput() {
+			if inI == len(info.Input) {
+				return nil, fmt.Errorf("fewer input in vector than in circuit")
+			}
+			assignmentRaw = info.Input[inI]
+			inI++
+		} else if outputSet[i] {
+			if outI == len(info.Output) {
+				return nil, fmt.Errorf("fewer output in vector than in circuit")
+			}
+			assignmentRaw = info.Output[outI]
+			outI++
+		}
+		if assignmentRaw != nil {
+			var wireAssignment []{{ .ElementType }}
+			if wireAssignment, err = sliceToElementSlice(assignmentRaw); err != nil {
+				return nil, err
+			}
+
+			fullAssignment[i] = wireAssignment
+			inOutAssignment[i] = wireAssignment
+		}
+	}
+
+	fullAssignment.Complete(circuit)
+
+	for i := range circuit {
+		if outputSet[i] {
+			if err = sliceEquals(inOutAssignment[i], fullAssignment[i]); err != nil {
+				return nil, fmt.Errorf("assignment mismatch: %v", err)
+			}
+		}
+	}
+
+	tCase = &TestCase{
+		FullAssignment:  fullAssignment,
+		InOutAssignment: inOutAssignment,
+		Proof:           proof,
+		Hash:            _hash,
+		Circuit:         circuit,
+		Schedule:        schedule,
+		{{ if .GenerateTestVectors }} Info:            info, {{ end }}
+	}
+
+	testCases[path] = tCase
+
+	return tCase, nil
+}
+
+{{ end }}
+
+{{- define "setElement element value elementType"}}
+{{- if eq .elementType "fr.Element"}} setElement(&{{.element}}, {{.value}})
+{{- else if eq .elementType "small_rational.SmallRational"}} {{.element}}.SetInterface({{.value}})
+{{- else}}
+{{print "\"UNEXPECTED TYPE" .elementType "\""}}
+{{- end}}
+{{- end}}
