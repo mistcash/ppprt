@@ -825,11 +825,24 @@ func (pr *Pairing) MillerLoopAndMul(P *G1Affine, Q *G2Affine, previous *GTEl) (*
 
 // millerLoopAndFinalExpResult computes the Miller loop between P and Q,
 // multiplies it in 𝔽p¹² by previous and returns the result.
-func (pr *Pairing) millerLoopAndFinalExpResult(P *G1Affine, Q *G2Affine, previous *GTEl) *GTEl {
+func (pr *Pairing) millerLoopAndFinalExpResult(P []*G1Affine, Q []*G2Affine, previous *GTEl) *GTEl {
 	tower := pr.ToTower(previous)
 
+	if len(P) != len(Q) {
+		return nil
+	}
+
+	inputs := make([]*baseEl, 0, 2*len(P)+4*len(Q)+12)
+	for _, p := range P {
+		inputs = append(inputs, &p.X, &p.Y)
+	}
+	for _, q := range Q {
+		inputs = append(inputs, &q.P.X.A0, &q.P.X.A1, &q.P.Y.A0, &q.P.Y.A1)
+	}
+	inputs = append(inputs, tower[0], tower[1], tower[2], tower[3], tower[4], tower[5], tower[6], tower[7], tower[8], tower[9], tower[10], tower[11])
+
 	// hint the non-residue witness
-	hint, err := pr.curveF.NewHint(millerLoopAndCheckFinalExpHint, 18, &P.X, &P.Y, &Q.P.X.A0, &Q.P.X.A1, &Q.P.Y.A0, &Q.P.Y.A1, tower[0], tower[1], tower[2], tower[3], tower[4], tower[5], tower[6], tower[7], tower[8], tower[9], tower[10], tower[11])
+	hint, err := pr.curveF.NewHint(millerLoopAndCheckFinalExpHint, 18, inputs...)
 	if err != nil {
 		// err is non-nil only for invalid number of inputs
 		panic(err)
@@ -872,15 +885,22 @@ func (pr *Pairing) millerLoopAndFinalExpResult(P *G1Affine, Q *G2Affine, previou
 	residueWitnessInvPoly := pr.Ext12.InversePoly(residueWitnessPoly)
 	residueWitnessInv := pr.Ext12.PolyToE12(residueWitnessInvPoly)
 
-	if Q.Lines == nil {
-		Qlines := pr.computeLines(&Q.P)
-		Q.Lines = &Qlines
+	n := len(P)
+	if n == 0 || n != len(Q) {
+		panic("invalid inputs sizes")
 	}
-	lines := *Q.Lines
+	lines := make([]lineEvaluations, len(Q))
+	for i := range Q {
+		if Q[i].Lines == nil {
+			Qlines := pr.computeLines(&Q[i].P)
+			Q[i].Lines = &Qlines
+		}
+		lines[i] = *Q[i].Lines
+	}
 
-	res, err := pr.millerLoopLines(
-		[]*G1Affine{P},
-		[]lineEvaluations{lines},
+	resA, err := pr.millerLoopLines(
+		P,
+		lines,
 		residueWitnessInvPoly,
 		residueWitnessPoly,
 		false,
@@ -890,27 +910,48 @@ func (pr *Pairing) millerLoopAndFinalExpResult(P *G1Affine, Q *G2Affine, previou
 	}
 
 	// multiply by previous multi-Miller function
-	res.Mul(previous.ToPoly())
+	res := pr.Ext12.Mul(pr.Ext12.PolyToE12(resA.Eval()), previous)
 
 	// Check that  res * cubicNonResiduePower * residueWitnessInv^λ' == 1
 	// where λ' = q^3 - q^2 + q, with u the BN254 seed
 	// and residueWitnessInv, cubicNonResiduePower from the hint.
 	// Note that res is already MillerLoop(P,Q) * residueWitnessInv^{6x₀+2} since
 	// we initialized the Miller loop accumulator with residueWitnessInv.
+	t2 := pr.Ext12.Mul(&cubicNonResiduePower, res)
 
-	res.Mul(cubicNonResiduePower.ToPoly())
+	t1 := pr.FrobeniusCube(residueWitnessInv)
+	t0 := pr.FrobeniusSquare(residueWitness)
+	t1 = pr.Ext12.Mul(t1, t0)
+	t0 = pr.Frobenius(residueWitnessInv)
+	t1 = pr.Ext12.Mul(t1, t0)
 
-	// residueWitnessInv^(q^3)
-	rwQ3 := pr.FrobeniusCube(residueWitnessInv)
-	res.Mul(rwQ3.ToPoly())
-	// residueWitnessInv^(-q^2) = residueWitness^(q^2)
-	rwQ2Inv := pr.FrobeniusSquare(residueWitness)
-	res.Mul(rwQ2Inv.ToPoly())
-	// residueWitnessInv^(q)
-	rwQ1 := pr.Frobenius(residueWitnessInv)
-	res.Mul(rwQ1.ToPoly())
+	t2 = pr.Ext12.Mul(t2, t1)
 
-	return pr.PolyToE12(res.Eval())
+	return t2
+	// res.Eval();
+
+	// // multiply by previous multi-Miller function
+	// res.Mul(previous.ToPoly())
+
+	// // Check that  res * cubicNonResiduePower * residueWitnessInv^λ' == 1
+	// // where λ' = q^3 - q^2 + q, with u the BN254 seed
+	// // and residueWitnessInv, cubicNonResiduePower from the hint.
+	// // Note that res is already MillerLoop(P,Q) * residueWitnessInv^{6x₀+2} since
+	// // we initialized the Miller loop accumulator with residueWitnessInv.
+
+	// res.Mul(cubicNonResiduePower.ToPoly())
+
+	// // residueWitnessInv^(q^3)
+	// rwQ3 := pr.FrobeniusCube(residueWitnessInv)
+	// res.Mul(rwQ3.ToPoly())
+	// // residueWitnessInv^(-q^2) = residueWitness^(q^2)
+	// rwQ2Inv := pr.FrobeniusSquare(residueWitness)
+	// res.Mul(rwQ2Inv.ToPoly())
+	// // residueWitnessInv^(q)
+	// rwQ1 := pr.Frobenius(residueWitnessInv)
+	// res.Mul(rwQ1.ToPoly())
+
+	// return pr.PolyToE12(res.Eval())
 }
 
 // IsMillerLoopAndFinalExpOne computes the Miller loop between P and Q,
@@ -924,10 +965,25 @@ func (pr *Pairing) millerLoopAndFinalExpResult(P *G1Affine, Q *G2Affine, previou
 //
 // [On Proving Pairings]: https://eprint.iacr.org/2024/640.pdf
 func (pr *Pairing) IsMillerLoopAndFinalExpOne(P *G1Affine, Q *G2Affine, previous *GTEl) frontend.Variable {
-	t2 := pr.millerLoopAndFinalExpResult(P, Q, previous)
+	t2 := pr.millerLoopAndFinalExpResult([]*G1Affine{P}, []*G2Affine{Q}, previous)
 
 	res := pr.IsEqual(t2, pr.Ext12.One())
 	return res
+}
+
+// AssertMultiMillerLoopAndFinalExpIsOne computes the Miller loop between
+// P and Q and multiplies it in 𝔽p¹² by previous.
+// multiplies it in 𝔽p¹² by previous and returns a boolean indicating if
+// the result lies in the same equivalence class as the reduced pairing
+// purported to be 1. This check replaces the final exponentiation step
+// in-circuit and follows Section 4 of [On Proving Pairings] paper by A.
+// Novakovic and L. Eagen.
+//
+// [On Proving Pairings]: https://eprint.iacr.org/2024/640.pdf
+func (pr *Pairing) AssertMultiMillerLoopAndFinalExpIsOne(P []*G1Affine, Q []*G2Affine, previous *GTEl) {
+	// t2 := pr.millerLoopAndFinalExpResult(P, Q, pr.Ext12.Mul(previous, pr.Ext12.Inverse(previous)))
+	t2 := pr.millerLoopAndFinalExpResult(P, Q, previous)
+	pr.AssertIsEqual(t2, pr.Ext12.One())
 }
 
 // AssertMillerLoopAndFinalExpIsOne computes the Miller loop between P and Q,
@@ -940,6 +996,6 @@ func (pr *Pairing) IsMillerLoopAndFinalExpOne(P *G1Affine, Q *G2Affine, previous
 //
 // [On Proving Pairings]: https://eprint.iacr.org/2024/640.pdf
 func (pr *Pairing) AssertMillerLoopAndFinalExpIsOne(P *G1Affine, Q *G2Affine, previous *GTEl) {
-	t2 := pr.millerLoopAndFinalExpResult(P, Q, previous)
+	t2 := pr.millerLoopAndFinalExpResult([]*G1Affine{P}, []*G2Affine{Q}, previous)
 	pr.AssertIsEqual(t2, pr.Ext12.One())
 }
