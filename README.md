@@ -1,3 +1,53 @@
+# PPPRT — Pairing Proofs and Polynomial Ring Toolkit (paper reference)
+
+> [!WARNING]
+> **Archived research artifact. NOT SOUND — do not use in production.**
+> This repository is a fork of an older `gnark` (v0.14.0-84, March 2026, with
+> upstream merges up to August 2026) and does not include later upstream
+> soundness fixes. It is kept only to reproduce the benchmark numbers reported
+> in the paper.
+>
+> **Use [mistcash/polyring-toolkit](https://github.com/mistcash/polyring-toolkit)
+> instead**, which is built on current `gnark`.
+
+Reference implementation for *Pairing Proofs and Polynomial Ring Toolkit*
+(S. Srivastav, IACR TCHES 2027).
+
+## History
+
+- The first commit is a snapshot of [Consensys/gnark](https://github.com/Consensys/gnark)
+  at `6e6960808`, with upstream history squashed into it.
+- All following commits are the original development history, unchanged.
+  The two `Merge upstream gnark … (squashed)` commits bring in upstream changes,
+  again squashed into one commit each.
+
+The Go module path is still `github.com/consensys/gnark`, so the packages build
+as in upstream.
+
+## Where to look
+
+| Paper | Code |
+|---|---|
+| Polynomial ring toolkit (Section 6) | `std/math/emulated/field_polyring.go` |
+| BN254 pairing with polynomial ring checks | `std/algebra/emulated/sw_bn254/pairing.go`, `std/algebra/emulated/fields_bn254/e12.go` |
+| BLS12-381 pairing | `std/algebra/emulated/sw_bls12381/pairing.go` |
+| 3-pairing benchmark (Table 7) | `std/algebra/emulated/sw_bn254/g16_simulation_test.go`, `std/algebra/emulated/sw_bls12381/g16_simulation_test.go` |
+
+Run the benchmarks:
+
+```sh
+go test -run '^$' -bench 'Groth16Simulation' -benchmem ./std/algebra/emulated/sw_bn254/ ./std/algebra/emulated/sw_bls12381/
+```
+
+The gnark baseline in the paper is the same benchmark compiled against upstream
+`gnark` instead of this fork.
+
+## License
+
+Apache 2.0, as upstream `gnark` (see [LICENSE](LICENSE)).
+
+---
+
 # `gnark` zk-SNARK library
 
 [![Twitter URL](https://img.shields.io/twitter/url/https/twitter.com/gnark_team.svg?style=social&label=Follow%20%40gnark_team)](https://twitter.com/gnark_team) [![License](https://img.shields.io/badge/license-Apache%202-blue)](LICENSE)
