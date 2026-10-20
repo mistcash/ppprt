@@ -94,13 +94,18 @@ cd ../gnark-baseline
 git checkout c05c6a8109be76360431f478ba5bc8e5969e05cf   # upstream commit this repo is merged on
 git -C ../ppprt show 8ea4366 -- frontend/cs/scs/api.go | git apply
 for c in sw_bn254 sw_bls12381; do
-  cp ../ppprt/std/algebra/emulated/$c/g16_simulation_test.go std/algebra/emulated/$c/
+  cp ../ppprt/std/algebra/emulated/$c/g16_*_test.go std/algebra/emulated/$c/
 done
 go test -v -run '^$' -bench 'Groth16Simulation' -benchmem \
   ./std/algebra/emulated/sw_bn254/ ./std/algebra/emulated/sw_bls12381/
 ```
 
 (Adjust `../ppprt` if your checkout of this repo has another name.)
+
+The same steps with `git checkout v0.16.4` instead run the baseline on gnark
+with the security fixes: 2,834,581 SCS and 791,907 R1CS constraints on BN254,
+3,164,858 and 881,274 on BLS12-381. polyring's `paper/` benchmark reproduces
+these to the digit as its gnark column.
 
 The raw output of the baseline run reported in the paper is kept verbatim in
 both test files, in the `Benchmark results BEFORE` comment at the bottom; it
@@ -142,6 +147,30 @@ Measured on an Apple M3 Pro, Go 1.26.4.
   repo's `HEAD` is merged on, so it re-runs both columns on the same base.
 - Every reduction stays within half a percentage point of the paper's, or
   improves on it.
+
+### Committed wires
+
+Table 7's "Nb Fq Committed" sums the values passed to every `api.Commit` call,
+so a wire committed twice counts twice. The circuit's commitments themselves
+cover fewer, unique wires; that is what the prover commits to, and what
+polyring's `paper/` benchmark reports. To count them here (test-only, the
+measured code is unchanged):
+
+```sh
+go test -v -run CommittedWires ./std/algebra/emulated/sw_bn254/ ./std/algebra/emulated/sw_bls12381/
+```
+
+It runs in the baseline checkout above too, since the `cp` copies it.
+
+| Committed wires | Baseline (upstream `c05c6a8`) | This repo `HEAD` | Reduction |
+|---|---|---|---|
+| BN254 SCS | 381,400 | 245,894 | 35.5% |
+| BN254 R1CS | 374,989 | 273,114 | 27.2% |
+| BLS12-381 SCS | 428,261 | 273,575 | 36.1% |
+| BLS12-381 R1CS | 422,037 | 318,962 | 24.4% |
+
+So the paper's "over 50% fewer committed elements" holds for values passed to
+`api.Commit`. Counted as unique committed wires, the reduction is 24–36%.
 
 ## History
 
