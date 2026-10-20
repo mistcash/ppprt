@@ -1,46 +1,158 @@
 # PPPRT — Pairing Proofs and Polynomial Ring Toolkit (paper reference)
 
 > [!WARNING]
-> **Archived research artifact. NOT SOUND — do not use in production.**
-> This repository is a fork of an older `gnark` (v0.14.0-84, March 2026, with
-> upstream merges up to August 2026) and does not include later upstream
-> soundness fixes. It is kept only to reproduce the benchmark numbers reported
-> in the paper.
+> **Paper reference artifact. NOT SOUND — do not use in production.**
+> This fork predates two gnark security fixes that apply to the code it
+> benchmarks (see [Why this is not sound](#why-this-is-not-sound)). It is
+> kept, frozen, only to reproduce the numbers reported in the paper.
 >
-> **Use [mistcash/polyring-toolkit](https://github.com/mistcash/polyring-toolkit)
-> instead**, which is built on current `gnark`.
+> **For anything else use [mistcash/polyring](https://github.com/mistcash/polyring)**:
+> the same technique as a standalone Go module on patched `gnark`.
 
-Reference implementation for *Pairing Proofs and Polynomial Ring Toolkit*
-(S. Srivastav, IACR TCHES 2027).
+Reference implementation for:
 
-## History
+> Shramee Srivastav. *Pairing Proofs and Polynomial Ring Toolkit.*
+> IACR Transactions on Cryptographic Hardware and Embedded Systems (TCHES), 2027.
 
-- The first commit is a snapshot of [Consensys/gnark](https://github.com/Consensys/gnark)
-  at `6e6960808`, with upstream history squashed into it.
-- All following commits are the original development history, unchanged.
-  The two `Merge upstream gnark … (squashed)` commits bring in upstream changes,
-  again squashed into one commit each.
+## Two repositories, two jobs
 
-The Go module path is still `github.com/consensys/gnark`, so the packages build
-as in upstream.
+| | this repo (`ppprt`) | [`polyring`](https://github.com/mistcash/polyring) |
+|---|---|---|
+| Purpose | reproduce the paper's Table 7 | use the technique |
+| Built on | gnark fork, upstream merged up to `c05c6a8` (3 Aug 2026) | gnark v0.16.4 (patched) via a pinned fork |
+| Sound | **no** | yes, unaudited |
+| Shape | toolkit inside gnark's `std/math/emulated` | standalone module: `std/polyring`, ring pairing, recursive Groth16 verifier, Solidity verifier |
+| Maintained | frozen | yes |
+
+polyring's [`ARTIFACT.md`](https://github.com/mistcash/polyring/blob/main/ARTIFACT.md)
+puts the paper's numbers, this repo's re-run and polyring's numbers on patched
+gnark side by side, and explains how they relate.
+
+## Why this is not sound
+
+Two gnark advisories published after this fork's last upstream merge apply to
+the emulated arithmetic and pairing code this repo builds on:
+
+- [GHSA-3mvx-pp85-pm65](https://github.com/Consensys/gnark/security/advisories/GHSA-3mvx-pp85-pm65)
+  (critical, fixed in v0.16.2): the carry polynomial in emulated-field deferred
+  checks came from a hint and was never range-checked, so a malicious prover
+  could satisfy a false multiplication. Every `std/algebra/emulated` pairing,
+  this repo's included, sits on those checks.
+- [GHSA-fwf3-jmp7-gmrj](https://github.com/Consensys/gnark/security/advisories/GHSA-fwf3-jmp7-gmrj)
+  (medium): the on-twist check on G2 inputs to the Miller loop was computed and
+  then discarded.
+
+The fixes add constraints to **both** columns of Table 7, gnark's own pairing
+included. This repo is left as it was measured so the published numbers stay
+reproducible; polyring carries the fixes.
 
 ## Where to look
 
 | Paper | Code |
 |---|---|
 | Polynomial ring toolkit (Section 6) | `std/math/emulated/field_polyring.go` |
-| BN254 pairing with polynomial ring checks | `std/algebra/emulated/sw_bn254/pairing.go`, `std/algebra/emulated/fields_bn254/e12.go` |
+| `NewPolyRingCheck`, `MulPolyRings`, `ToCommit`, `PolyRingAccumulator` (Section 6.3.1) | same file |
+| `performDeferredRingChecks`, `polyRingMulHint`, `quotientsRLCHint` (Sections 6.2, 6.3) | same file |
+| `InnerProductNoReduce`, deferred reduction (Section 6.5) | same file |
+| BN254 pairing with polynomial ring checks (Sections 4–5) | `std/algebra/emulated/sw_bn254/pairing.go`, `std/algebra/emulated/fields_bn254/e12.go` |
 | BLS12-381 pairing | `std/algebra/emulated/sw_bls12381/pairing.go` |
 | 3-pairing benchmark (Table 7) | `std/algebra/emulated/sw_bn254/g16_simulation_test.go`, `std/algebra/emulated/sw_bls12381/g16_simulation_test.go` |
 
-Run the benchmarks:
+## Reproducing Table 7
+
+Requirements: Go ≥ 1.25.7 (tested with 1.26.4). No other setup. Each package
+takes about 10 s to benchmark after the first build.
+
+### "This Work" column
 
 ```sh
-go test -run '^$' -bench 'Groth16Simulation' -benchmem ./std/algebra/emulated/sw_bn254/ ./std/algebra/emulated/sw_bls12381/
+go test -v -run '^$' -bench 'Groth16Simulation' -benchmem \
+  ./std/algebra/emulated/sw_bn254/ ./std/algebra/emulated/sw_bls12381/
 ```
 
-The gnark baseline in the paper is the same benchmark compiled against upstream
-`gnark` instead of this fork.
+Each package prints two lines like
+
+```
+g16_simulation_test.go:141: nb commitments: 269656, scs size: … (bytes), nb constraints 1035645, …
+g16_simulation_test.go:167: nb commitments: 269656, r1cs size: … (bytes), nb constraints 316181, …
+```
+
+plus four benchmark lines (`compile_scs`, `solve_scs`, `compile_r1cs`,
+`solve_r1cs`). Lines like `api.Commit …/field_polyring.go:433 commitmentIndex=0`
+are a leftover debug print and can be ignored.
+
+### Baseline column
+
+The baseline is the same benchmark file compiled against upstream gnark. It
+needs one line of instrumentation from this repo: the `nb commitments` counter
+(`scs.NbCommitments`, added to `frontend/cs/scs/api.go` in `8ea4366`), which
+upstream does not have. From a checkout of this repo:
+
+```sh
+git clone https://github.com/Consensys/gnark ../gnark-baseline
+cd ../gnark-baseline
+git checkout c05c6a8109be76360431f478ba5bc8e5969e05cf   # upstream commit this repo is merged on
+git -C ../ppprt show 8ea4366 -- frontend/cs/scs/api.go | git apply
+for c in sw_bn254 sw_bls12381; do
+  cp ../ppprt/std/algebra/emulated/$c/g16_simulation_test.go std/algebra/emulated/$c/
+done
+go test -v -run '^$' -bench 'Groth16Simulation' -benchmem \
+  ./std/algebra/emulated/sw_bn254/ ./std/algebra/emulated/sw_bls12381/
+```
+
+(Adjust `../ppprt` if your checkout of this repo has another name.)
+
+The raw output of the baseline run reported in the paper is kept verbatim in
+both test files, in the `Benchmark results BEFORE` comment at the bottom; it
+matches Table 7's baseline column to the digit.
+
+### Reading the output
+
+| Table 7 row | Benchmark output |
+|---|---|
+| Nb Constraints | `nb constraints` on the `:141` (SCS) and `:167` (R1CS) lines |
+| Nb Fq Committed | `nb commitments`: the number of values passed to `api.Commit`. The counter is only incremented by the SCS builder, so the R1CS line repeats the SCS value: it is the same circuit. |
+| Compile Time, Solve Time | `ns/op` of `compile_*` and `solve_*` |
+| Compile Memory, Solve Memory | `B/op` of the same lines: bytes allocated per operation (`-benchmem`), not peak memory. The paper's GB and MB are 2³⁰ and 2²⁰ bytes. |
+
+Constraint and commitment counts are deterministic. Times and allocations
+depend on the machine; the paper's were taken on an Apple M3 Pro (arm64).
+
+### Expected results
+
+Measured on an Apple M3 Pro, Go 1.26.4.
+
+| | Paper | Re-run (this repo `HEAD`, upstream `c05c6a8`) |
+|---|---|---|
+| **BN254** SCS constraints | 1,592,440 → 1,035,550 (35.0%) | 1,604,279 → 1,035,645 (35.4%) |
+| Fq committed | 571,125 → 269,616 (52.8%) | 606,104 → 269,656 (55.5%) |
+| R1CS constraints | 491,447 → 316,167 (35.7%) | 495,810 → 316,181 (36.2%) |
+| **BLS12-381** SCS constraints | 1,784,247 → 1,191,105 (33.2%) | 1,779,202 → 1,191,256 (33.0%) |
+| Fq committed | 660,160 → 300,104 (54.5%) | 673,107 → 300,166 (55.4%) |
+| R1CS constraints | 545,510 → 368,434 (32.5%) | 542,925 → 368,461 (32.1%) |
+
+- **This Work** reproduces to within 0.02% (at most 151 constraints and 62
+  committed elements). The exact working tree the paper's column was measured
+  on was not committed. At `2f9ffd0` the committed-element counts match the
+  paper exactly (269,616 and 300,104) and constraints are 212 (BN254) and 156
+  (BLS12-381) below it.
+- **Baseline** reproduces to within 1% on constraints and 6% on committed
+  elements. The paper's baseline run was recorded on 5 July 2026 (`8ea4366`)
+  against the upstream gnark of the time; `c05c6a8` is the upstream commit this
+  repo's `HEAD` is merged on, so it re-runs both columns on the same base.
+- Every reduction stays within half a percentage point of the paper's, or
+  improves on it.
+
+## History
+
+- The first commit is a snapshot of [Consensys/gnark](https://github.com/Consensys/gnark)
+  at `6e6960808`, with upstream history squashed into it.
+- All following commits are the original development history, unchanged.
+  The two `Merge upstream gnark … (squashed)` commits bring in upstream changes
+  (`8e4363f1a` and `c05c6a810`), again squashed into one commit each.
+
+The Go module path is still `github.com/consensys/gnark`, so the packages build
+as in upstream.
 
 ## License
 
