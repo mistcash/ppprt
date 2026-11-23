@@ -24,7 +24,7 @@ Reference implementation for:
 | Shape | toolkit inside gnark's `std/math/emulated` | standalone module: `std/polyring`, ring pairing, recursive Groth16 verifier, Solidity verifier |
 | Maintained | frozen | yes |
 
-polyring's [`ARTIFACT.md`](https://github.com/mistcash/polyring/blob/main/ARTIFACT.md)
+polyring's [`ARTIFACT.md`](https://github.com/mistcash/polyring/blob/main/paper/ARTIFACT.md)
 puts the paper's numbers, this repo's re-run and polyring's numbers on patched
 gnark side by side, and explains how they relate.
 
