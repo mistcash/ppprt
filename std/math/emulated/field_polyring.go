@@ -720,7 +720,7 @@ func (f *Field[T]) InnerProductNoReduce(a, b []*Element[T]) *Element[T] {
 	var eval *Element[T]
 	var maxTermOverflow uint = 0
 	// adding n terms can result in an overflow of log2(n) bits
-	var additionOverflow uint = uint(bits.Len(uint(n-1))) + 1
+	var additionOverflow = uint(bits.Len(uint(n-1))) + 1
 
 	for _, term := range terms {
 		if term != nil {

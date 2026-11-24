@@ -669,6 +669,7 @@ func TestIsMillerLoopAndFinalExpCircuitTestSolve(t *testing.T) {
 		Expected: 0,
 	}
 	err = test.IsSolved(&IsMillerLoopAndFinalExpCircuit{}, &witness, ecc.BN254.ScalarField())
+	assert.NoError(err)
 
 	_scs, err := frontend.Compile(ecc.BN254.ScalarField(), scs.NewBuilder, &witness)
 	assert.NoError(err)
