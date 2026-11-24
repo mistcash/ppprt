@@ -9,6 +9,7 @@ import (
 
 	"github.com/consensys/gnark"
 	"github.com/consensys/gnark/constraint"
+
 	// "github.com/consensys/gnark/debug"
 	"github.com/consensys/gnark/frontend/schema"
 	"github.com/consensys/gnark/internal/circuitdefer"

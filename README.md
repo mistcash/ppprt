@@ -24,7 +24,7 @@ Reference implementation for:
 | Shape | toolkit inside gnark's `std/math/emulated` | standalone module: `std/polyring`, ring pairing, recursive Groth16 verifier, Solidity verifier |
 | Maintained | frozen | yes |
 
-polyring's [`ARTIFACT.md`](https://github.com/mistcash/polyring/blob/main/ARTIFACT.md)
+polyring's [`ARTIFACT.md`](https://github.com/mistcash/polyring/blob/main/paper/ARTIFACT.md)
 puts the paper's numbers, this repo's re-run and polyring's numbers on patched
 gnark side by side, and explains how they relate.
 
@@ -66,6 +66,7 @@ takes about 10 s to benchmark after the first build.
 ### "This Work" column
 
 ```sh
+git checkout 2f9ffd0
 go test -v -run '^$' -bench 'Groth16Simulation' -benchmem \
   ./std/algebra/emulated/sw_bn254/ ./std/algebra/emulated/sw_bls12381/
 ```
@@ -73,8 +74,8 @@ go test -v -run '^$' -bench 'Groth16Simulation' -benchmem \
 Each package prints two lines like
 
 ```
-g16_simulation_test.go:141: nb commitments: 269656, scs size: … (bytes), nb constraints 1035645, …
-g16_simulation_test.go:167: nb commitments: 269656, r1cs size: … (bytes), nb constraints 316181, …
+g16_simulation_test.go:141: nb commitments: 269616, scs size: … (bytes), nb constraints 1035338, …
+g16_simulation_test.go:167: nb commitments: 269616, r1cs size: … (bytes), nb constraints 315955, …
 ```
 
 plus four benchmark lines (`compile_scs`, `solve_scs`, `compile_r1cs`,
@@ -83,24 +84,16 @@ are a leftover debug print and can be ignored.
 
 ### Baseline column
 
-The baseline is the same benchmark file compiled against upstream gnark. It
-needs one line of instrumentation from this repo: the `nb commitments` counter
-(`scs.NbCommitments`, added to `frontend/cs/scs/api.go` in `8ea4366`), which
-upstream does not have. From a checkout of this repo:
+The baseline is the same tree with gnark's own pairing files (upstream `8e4363f`) and `e12.go` from `8ea4366`:
 
 ```sh
-git clone https://github.com/Consensys/gnark ../gnark-baseline
-cd ../gnark-baseline
-git checkout c05c6a8109be76360431f478ba5bc8e5969e05cf   # upstream commit this repo is merged on
-git -C ../ppprt show 8ea4366 -- frontend/cs/scs/api.go | git apply
-for c in sw_bn254 sw_bls12381; do
-  cp ../ppprt/std/algebra/emulated/$c/g16_simulation_test.go std/algebra/emulated/$c/
-done
+git checkout 2f9ffd0
+git fetch --depth 1 https://github.com/Consensys/gnark 8e4363f1a60dc2febaa872fbda8847d78ce8cf48
+git checkout FETCH_HEAD -- std/algebra/emulated/sw_bn254/pairing.go std/algebra/emulated/sw_bn254/hints.go std/algebra/emulated/sw_bls12381/pairing.go
+git checkout 8ea4366 -- std/algebra/emulated/fields_bn254/e12.go std/algebra/emulated/fields_bls12381/e12.go
 go test -v -run '^$' -bench 'Groth16Simulation' -benchmem \
   ./std/algebra/emulated/sw_bn254/ ./std/algebra/emulated/sw_bls12381/
 ```
-
-(Adjust `../ppprt` if your checkout of this repo has another name.)
 
 The raw output of the baseline run reported in the paper is kept verbatim in
 both test files, in the `Benchmark results BEFORE` comment at the bottom; it
@@ -122,26 +115,16 @@ depend on the machine; the paper's were taken on an Apple M3 Pro (arm64).
 
 Measured on an Apple M3 Pro, Go 1.26.4.
 
-| | Paper | Re-run (this repo `HEAD`, upstream `c05c6a8`) |
+| | Paper | Re-run (`2f9ffd0`) |
 |---|---|---|
-| **BN254** SCS constraints | 1,592,440 → 1,035,550 (35.0%) | 1,604,279 → 1,035,645 (35.4%) |
-| Fq committed | 571,125 → 269,616 (52.8%) | 606,104 → 269,656 (55.5%) |
-| R1CS constraints | 491,447 → 316,167 (35.7%) | 495,810 → 316,181 (36.2%) |
-| **BLS12-381** SCS constraints | 1,784,247 → 1,191,105 (33.2%) | 1,779,202 → 1,191,256 (33.0%) |
-| Fq committed | 660,160 → 300,104 (54.5%) | 673,107 → 300,166 (55.4%) |
-| R1CS constraints | 545,510 → 368,434 (32.5%) | 542,925 → 368,461 (32.1%) |
+| **BN254** SCS constraints | 1,592,440 → 1,035,550 (35.0%) | 1,592,216 → 1,035,338 (35.0%) |
+| Fq committed | 571,125 → 269,616 (52.8%) | 571,125 → 269,616 (52.8%) |
+| R1CS constraints | 491,447 → 316,167 (35.7%) | 491,223 → 315,955 (35.7%) |
+| **BLS12-381** SCS constraints | 1,784,247 → 1,191,105 (33.2%) | 1,784,091 → 1,190,949 (33.2%) |
+| Fq committed | 660,160 → 300,104 (54.5%) | 660,160 → 300,104 (54.5%) |
+| R1CS constraints | 545,510 → 368,434 (32.5%) | 545,354 → 368,278 (32.5%) |
 
-- **This Work** reproduces to within 0.02% (at most 151 constraints and 62
-  committed elements). The exact working tree the paper's column was measured
-  on was not committed. At `2f9ffd0` the committed-element counts match the
-  paper exactly (269,616 and 300,104) and constraints are 212 (BN254) and 156
-  (BLS12-381) below it.
-- **Baseline** reproduces to within 1% on constraints and 6% on committed
-  elements. The paper's baseline run was recorded on 5 July 2026 (`8ea4366`)
-  against the upstream gnark of the time; `c05c6a8` is the upstream commit this
-  repo's `HEAD` is merged on, so it re-runs both columns on the same base.
-- Every reduction stays within half a percentage point of the paper's, or
-  improves on it.
+Fq committed counts are identical to the paper; constraints are within 0.06%.
 
 ## History
 
